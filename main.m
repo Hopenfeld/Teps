@@ -1,4 +1,4 @@
-function [pksteps,stats,statsr] = runmanymsnr(sigsin,samprate,trpks,segsh,mtchoset)
+function [pksteps,stats,statsr] = main(sigsin,samprate,trpks,segsh,mtchoset)
 %	The input record   
 %
 % Inputs: sigsin - m x n array of signals in double format, each row corresponding to one channel;
