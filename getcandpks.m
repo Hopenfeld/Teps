@@ -52,7 +52,7 @@ while ~stopd  %this loop is set up for adaptive peak selection based on changing
   d2dd=[2*d2d(1); d2dd; -2*d2d(end)]; %add starting and ending peaks; correct for lack of 2 neighbors
   [srtd2,srt]=sort(d2dd,'ascend');
   srtd2(end:20)=0;
-  %[nrvalso,numtokeep] = getbestpks(srtd2(1:20),11); %get potentially high quality peaks by looking for big
+  [nrvalso,numtokeep] = getbestpks(srtd2(1:20),11); %get potentially high quality peaks by looking for big
                                                     %drops in d2dd
   numtokeep=11; %set to fixed value for now
   segqual = min(max(1,round(100*sim(net,nrvalso(1:20)))),ncq); %estimate noise level with neural net
