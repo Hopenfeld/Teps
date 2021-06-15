@@ -27,29 +27,34 @@ while ~stopd  %this loop is set up for adaptive peak selection based on changing
   
   dd=sigin(d:end)-sigin(1:end-d+1);
   ddd=dd(d:end)-dd(1:end-d+1);
+
   [pkval,pospks] = findpeaks(ddd,"DoubleSided");
   pospks=pospks(find(pkval > 0));
-  [pkval,negpks] = findpeaks(ddd,"DoubleSided","MaxPeakWidth",5); %constrain negative peak width
-  negpks=negpks(find(pkval < 0));
+  [d2m,negpks] = findpeaks(ddd,"DoubleSided","MaxPeakWidth",5,"MinPeakWidth",1.5); %constrain negative peak width
+  np=find(d2m < 0);
+  negpks=negpks(np);
+  
   [dt,pr,d2m,d2p] = processpksloc(ddd,negpks,pospks,sampadj);
   %dt is number of samples between major negative peak (in 2nd difference signal) and previous 
   %positive peak
   %d2m is the magnitude of major negative peak
+  gdt=find((dt(:,1) > cluslim(1) & dt(:,1) < cluslim(2)) | (dt(:,2)>cluslim(1) & dt(:,2)<cluslim(2)));
+  %allow peak if timing to either previous or next positive peaks is acceptable
+  negpks=negpks(gdt);
+  d2m=d2m(gdt);
   d2mr=d2m;
   pksxa=round(negpks * sampadj);
-  gdt=find(dt(:,1)>cluslim(1) & dt(:,1) < cluslim(2));  %filter out too wide/narrow peaks
-  dt=dt(gdt,:);
-  d2m=d2m(gdt);  
-  negpks=negpks(gdt);
-  pr=pr(gdt,:);
-  d2p=d2p(gdt);
+
+
+
   d2d=d2m(2:end)-d2m(1:end-1);
   d2dd=d2d(2:end)-d2d(1:end-1); %peak prominence (2nd difference) of second difference ddd peaks
   d2dd=[2*d2d(1); d2dd; -2*d2d(end)]; %add starting and ending peaks; correct for lack of 2 neighbors
   [srtd2,srt]=sort(d2dd,'ascend');
   srtd2(end:20)=0;
-  [nrvalso,numtokeep] = getbestpks(srtd2(1:20),10); %get potentially high quality peaks by looking for big
+  %[nrvalso,numtokeep] = getbestpks(srtd2(1:20),11); %get potentially high quality peaks by looking for big
                                                     %drops in d2dd
+  numtokeep=11; %set to fixed value for now
   segqual = min(max(1,round(100*sim(net,nrvalso(1:20)))),ncq); %estimate noise level with neural net
   nslvl=[1:nrq]*qualmat(:,segqual)/sum(qualmat(:,segqual));
 
@@ -80,7 +85,6 @@ while ~stopd  %this loop is set up for adaptive peak selection based on changing
   end
   
 end
-
 if length(d2dd) > 3
   srt=srtu(1:min(numcand,length(srtu))); %select the numcand best peaks
   npksa=length(srtd2u);
@@ -102,9 +106,11 @@ function [dt,pr,d2m,d2p] = processpksloc(ddd,negpks,pospks,sampadj)
 
 pr=zeros(length(negpks),2);
 dt=zeros(length(negpks),2);
-d2m=zeros(length(negpks));
-d2p=zeros(length(negpks));
-for kk=1:length(negpks)
+d2m=zeros(length(negpks),1);
+d2p=zeros(length(negpks),1);
+doneflag=0;
+kk=1;
+while ~doneflag
 
   dp=negpks(kk)-pospks(find(pospks < negpks(kk)));
   [dum,mind]=min(dp);
@@ -113,44 +119,57 @@ for kk=1:length(negpks)
     pospr=pospks(mind);
     cpv=abs(ddd(negpks(kk)));
 
-    if kk > 1 
-      if pospr > negpks(kk-1) 
-        dt(kk,1)=negpks(kk)-pospr;
-        
-        d2m(kk)=cpv; 
-        d2p(kk)=ddd(pospr);
-
+      if kk==1 | pospr > negpks(kk-1) 
+       
         if mind < length(pospks)
           nxtp=pospks(mind+1);
-          if ddd(nxtp)  > 0 & nxtp < negpks(min(kk+1, length(negpks)))
+          if  kk==length(negpks) | nxtp < negpks(kk+1) 
+            dt(kk,1)=negpks(kk)-pospr;
+            d2m(kk)=cpv; 
             dt(kk,2)=nxtp-negpks(kk);
             d2p(kk)=max(ddd(pospr),ddd(nxtp));
-          end
-        end
-        
-        pa = find(negpks(1:kk-1) > negpks(kk)-500/sampadj);
-        if ~isempty(pa)
-          svals=sort(abs(ddd(negpks(pa))),'descend');
-          pr(kk,1)=cpv/mean(svals(1:min(5,length(svals))));
-        end
-        if kk < length(negpks)
-          pa = find(negpks(kk+1:end) < negpks(kk)+500/sampadj);
-          svals=sort(abs(ddd(negpks(pa))),'descend');
-          if ~isempty(pa)
-            pr(kk,2)=cpv/mean(svals(1:min(5,length(svals))));
-          end
+          elseif cpv > abs(ddd(negpks(kk+1))) %if two consecutive negative peaks, take largest
+            
+            dt(kk,1)=negpks(kk)-pospr;
+            d2m(kk)=cpv; 
+            dt(kk,2)=nxtp-negpks(kk);
+            d2p(kk)=max(ddd(pospr),ddd(nxtp));
+            kk=kk+1;
 
-        end       
+          end
+        else
+          dt(kk,1)=negpks(kk)-pospr;
+          d2m(kk)=cpv; 
+          d2p(kk)=ddd(pospr);
+        end
+          
+    else
+      
+        if mind < length(pospks)
+          nxtp=pospks(mind+1);
+          if kk==length(negpks) | nxtp < negpks(kk+1) 
+            dt(kk,2)=nxtp-negpks(kk);
+            d2p(kk)=ddd(nxtp);
+            d2m(kk)=cpv; 
+          end
+        end
         
       end
     else
-      dt(kk,1)=negpks(kk)-pospr;
+      dp=pospks(find(pospks > negpks(kk)))-negpks(kk);
+      dt2=min(dp);
+      dt(kk,2)=dt2;
       d2m(kk)=abs(ddd(negpks(kk)));
     end
+    kk=kk+1;
+    if kk > length(negpks)
+      doneflag=1;
+    end
     
-  end
  
 end
+
+
 
 function [nrvalso,numtokeep] = getbestpks(nrvalso,nmlim)
 

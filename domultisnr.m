@@ -14,7 +14,7 @@ cfs=[-0.5437 0.002004 0.001716];   %score coefficients for skips, temporal regul
 rrlim=[400 1300];  %rr interval limits in ms
                                                           
 numchan=length(sigs(:,1));
-numcand=30-5*(4-numchan); %number of "best" candidate peaks in each channel
+numcand=max(20,30-5*(4-numchan)); %number of "best" candidate peaks in each channel
 
 datoutsc=[];
 snrmat=[];
@@ -24,6 +24,9 @@ for ii=1:numchan  %process each channel
 
   siggu=sigs(ii,:);
   [pksx,snrb,pksten,snrba,ddd,nslvlu,statspks] = getcandpks(siggu,d,samprate,cluslim,numcand,trpksadj,rrlim);
+  %pksten
+  %pksx
+  %round(pksx*1000/256)
   %pksx - numcand best peaks in channel
   %snrb - matrix of SNR/prominence between peak pairs in pksx
   %pksten - possibly very high quality peaks within pksx
@@ -32,8 +35,9 @@ for ii=1:numchan  %process each channel
   %nslvlu - estimated noise level of channel
   %statspks - various statistics
   nslvls(ii)=nslvlu;
-  if nslvlu > 1
+  if 1==1
     [tmsallsc,nregsc,rrssc,skipssc,nmseqsc,snrssc] = singchan(pksten,snrba,rthold);
+
     %tmsallsc - rows are candidate sequences
     %nregsc - average temporal regularity score for each sequence
     %rrssc - average rr interval corresponding to each sequence
@@ -43,6 +47,8 @@ for ii=1:numchan  %process each channel
     if ~isempty(nregsc)
       snrssckp=round(100*snrssc); 
       smat=[skipssc(:) nregsc snrssckp(:)]';
+      gdh=find(nregsc > -800);
+      %[tmsallsc(gdh,:) round(nregsc(gdh)) snrssckp(gdh)(:) rrssc(gdh)(:)]
       scr=round(100*cfs*smat); %score the sequences
       [dum,sinds]=sort(scr,'descend');
       kp=sinds(1:min(3,length(sinds))); %keep 3 best sequences
@@ -58,10 +64,16 @@ for ii=1:numchan  %process each channel
 
 end
 
-
-[spksa,pkprb,pmo,pkmap,chd]=getclustersmsnr(pksa,0,pkgp,samprate);
+if numchan > 1
+  [spksa,pkprb,~,pkmap]=getclustersmsnr(pksa,0,pkgp,samprate);
 %get global peaks spksa and associated Bayesian timing coherence probability pkprb by clustering peak times (pksa) 
 %across channels; pkmap is the mapping from local channel peaks to the global peaks
+else
+  spksa=round(pksx*1000/256);
+  pkprb=0*spksa;
+  pkmap(spksa)=[1:length(spksa)];
+
+end
 
 rr=pkmap(snrmat(:,1)); %create global SNR matrices snrmat and snrmatglobal, the latter indexed by global peak time
 cc=pkmap(snrmat(:,2));
@@ -80,7 +92,7 @@ if isnan(mns)
 end
 
 snrind=round(mns/2.5)+5;
-snrprb=squeeze(prbsnr(numchan,snrind,:)); %probability for given SNR values as a function
+snrprb=squeeze(prbsnr(max(numchan,2),snrind,:)); %probability for given SNR values as a function
                                           %of the number of channels
 npad=length(pkprb)-length(mxc);
 mxc(end+[1:npad])=0;
@@ -106,8 +118,8 @@ pkptr=[1:nchs];
 [pksx,inds]=sort(spksa(pkptr)); %get nchs highest probability global peaks
 rpks=sort(spksa(pkptr(end)+1:end)); %rpeaks is the rest of the global peaks
 prbgpks=pkprb(inds);
-
 [tmsall,rrs,pknos] = permsearch(pksx,rrlim(1),0.25,3);  %find parent sequences based on best globabl peaks
+
 [rr,~,gv]=find(pknos);
 glprbs=accumarray(rr,prbgpks(gv)',[],@sum); %sum of global probablitites for each parent sequence; not used
 nseq=sum(tmsall > 0,2); %sequence length of parent sequence
@@ -126,15 +138,15 @@ rrs=rrs(gds);
 skips=skips(gds);
 glprbs=glprbs(gds);
 nseq=nseq(gds);
-
 datout=[];
 scra=[];
 sra1a=[];
 mxsc=-1000;
 
 for ii=1:length(tmsall(:,1))  %loop through parent sequences
-
+  
   tmsloc=tmsall(ii,:);
+ 
   if skips(ii) > 0 
     [tmsalla,rrsa,regsca,nmseqa,skipsa] = getchanseqsnr(rpks,tmsloc,rrs(ii),0.1,rthold,rrlim);
     %if the parent sequence has at least one skipped peak, fill in the gaps between 
@@ -161,10 +173,6 @@ if ~isempty(datoutsc)
  datout(end+[1:length(datoutsc(:,1))],[1:length(datoutsc(1,:))])=datoutsc;
 end
 
-
-if ~isempty(datout) & 1==0
-  [mxsc max(datout(:,2))]
-end
 datout = cullseqsloc(datout);
 %remove the lower scoring sequences in closely related groups
 
