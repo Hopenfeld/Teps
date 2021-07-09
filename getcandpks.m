@@ -45,8 +45,6 @@ while ~stopd  %this loop is set up for adaptive peak selection based on changing
   d2mr=d2m;
   pksxa=round(negpks * sampadj);
 
-
-
   d2d=d2m(2:end)-d2m(1:end-1);
   d2dd=d2d(2:end)-d2d(1:end-1); %peak prominence (2nd difference) of second difference ddd peaks
   d2dd=[2*d2d(1); d2dd; -2*d2d(end)]; %add starting and ending peaks; correct for lack of 2 neighbors
@@ -96,6 +94,8 @@ end
 
 d2m=d2mu(srt(srt1));
 pksx = round(pks * sampadj);
+
+plotinserts(negpks,trpks,pks,ddd)
 pksbst=round(pksbst * sampadj);
 snrbt = getpairqual(pksbst,pksxau,d2mru,rrlim); %SNR prominence matrices
 snrb = getpairqual(pksx,pksxa,d2mru,rrlim);

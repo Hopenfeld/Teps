@@ -11,6 +11,7 @@ pksgl=pksgl(find(~isnan(pksgl)));
    pksout1 = fillgapsmc(pksgl,pksin,rru1);
    pksout=pksout1; 
  else
+
    pksout = fillgapsmc(pksgl,pksin,rru);  %find peaks that "fit" within gaps of parent sequence
   end
 

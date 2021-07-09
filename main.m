@@ -1,4 +1,4 @@
-function [pksteps,stats,statsr] = main(sigsin,samprate,trpks,segsh,mtchoset)
+function [pksteps,stats,statsr,statst] = main(sigsin,samprate,trpks,segsh,mtchoset)
 %	The input record   
 %
 % Inputs: sigsin - m x n array of signals in double format, each row corresponding to one channel;
@@ -50,6 +50,8 @@ rrsteps=[];
 pksteps=[];
 rrlast=[];
 stats=[];
+statsr=[];
+statst=[];
 scoresaugcur=[];
 
 numchan=length(sigsin(:,1));
@@ -69,39 +71,46 @@ else
 end
 
 pklast=[];
-for iictr = 1:length(segproc) 
+for iictr = 1:length(segproc)
+
     ii=segproc(iictr);
     svr=round(nseg*(ii-1)+[1:nseg]);
     sigsr=sigsf(:,svr); %get segments
     tmoset=5000*(ii-1);
-    trpksa=trpks(find(trpks > tmoset & trpks <= tmoset+5000));
-    trpksu=trpksa-tmoset;
-    
+
     for kk=1:numchan  %compute second difference signals to assess correlation
       ddsigs(kk,:)=sigsr(kk,3:end)-2*sigsr(kk,2:end-1)+sigsr(kk,1:end-2); %compute second difference to get correlation
     end
     
-    cormat=tril(corr(ddsigs'),-1)';  
-                                     
-    [rc,cc]=find(abs(cormat) > 0.7);%add together channels that are highly correlated
+    cormat=tril(abs(corr(ddsigs')),-1)';                                
+    [rc,cc]=find(cormat > 0.6);%add together channels that are highly correlated
                                      %implemented to handle no more than a single pair
                                      %of highly correlated channels
-    if ~isempty(rc) & 1==0
+    if ~isempty(rc) 
       amp2=std(sigsr(rc(1),:));
       amp3=std(sigsr(cc(1),:));
       mn2=mean(sigsr(rc(1),:));
       mn3=mean(sigsr(cc(1),:));
       sigsr(rc(1),:)=(amp2*(sigsr(rc(1),:)-mn2)+amp3*(sigsr(cc(1),:))-mn3)/(amp2+amp3);
       sigsr(cc(1),:)=[];
+      cormat(rc(1),cc(1))=0;
+    end
+    coradj=1-min(1,3*max(0,max(cormat(:))-0.3)); 
+    
+    if ~isempty(trpks)
+      [trpksu,statst] = procref(trpks,tmoset,statst,ii);
+    else
+      trpksu=[];
     end
 
-    tmsallref=[];
-    statsa=domultisnr(sigsr,trpksu,256,mtchoset);
+    statsa=domultisnr(sigsr,trpksu,256,mtchoset,coradj);
+    stats{ii}=statsa;
     datuse=statsa.dat;
-    tmsall=datuse(:,3:end);
+    %round(datuse)
+    tmsall=datuse(:,5:end);
     scoreso=datuse(:,2);
     rrsa=datuse(:,1);
-    stats{ii}=statsa;
+    
     if isempty(datuse)
       rrsteps(ii)=NaN;
       continue
@@ -110,18 +119,28 @@ for iictr = 1:length(segproc)
     if ~isempty(tmslast)
       mold=max(scoreslast);
       if isempty(scoresaugcur)
-          [scores,scoresaugcur]=meshsegs(tmsall,tmslast,rrsa,rrslast,scoreslast,scoreso); %enhance scores for sequences that mesh
+          [scores,scoresaugcur]=meshsegs(tmsall,tmslast,rrsa,rrslast,scoreslast,scoreso,[]); %enhance scores for sequences that mesh
+          %[tmslast scores scoreslast]
+
       else
-          [scores,scoresaugcur]=meshsegs(tmsall,tmslast,rrsa,rrslast,scoreslast+scoresaugcur,scoreso); %enhance scores for sequences that mesh
+          [scores,scoresaugcur]=meshsegs(tmsall,tmslast,rrsa,rrslast,scoreslast,scoreso,scoresaugcur); %enhance scores for sequences that mesh
+          %[tmslast scores scoreslast]
       end 
      [mxscr,mind]=max(scores);
 
      if ~isempty(trpks)
         rrt=mean(trpkslast(2:end)-trpkslast(1:end-1));
-        nmtchs=getmatches(tmslast,trpkslast);
-        nmtch=nmtchs(mind);
-        statsv=[ii-1 nmtch max(nmtchs) length(trpkslast) mxscr mold rrslast(mind) rrt] 
+        [nmtchs,dp,ngd]=getmatches(tmslast,trpkslast,mtchoset);
+        if ~isempty(nmtchs)
+          nmtch=nmtchs(mind);
+          statsv=[ii-1 nmtch ngd(mind) dp(mind) max(nmtchs)  length(trpkslast) mxscr mold rrslast(mind)];
+          %tmslast(mind,:)
+        else
+          statsv=[ii-1 0 0 0 0  length(trpkslast) mxscr mold rrslast(mind)] ;
+        end
+        
         statsr(ii-1,:)=statsv;
+        %[rrslast(:) scoreslast(:) scores(:) nmtchs(:)]
         
     else
         %[ii-1 mxscr mold] 
@@ -130,7 +149,7 @@ for iictr = 1:length(segproc)
     end
     
     else
-         nmtchs=getmatches(tmsall,trpksu);
+         nmtchs=getmatches(tmsall,trpksu,mtchoset);
          %[tmsall nmtchs(:) scoreso rrsa]
 
     end 
@@ -151,4 +170,32 @@ scoreslast=scoreso;
 end
   
 endfunction
+
+function [trpksu,statst] = procref(trpks,tmoset,statst,indin)
+
+trpksa=trpks(find(trpks > tmoset & trpks <= tmoset+5000));
+trpksu=trpksa-tmoset;   
+tmsallref=[];
+rrstr=trpksu(2:end)-trpksu(1:end-1);
+rrstr=mean(rrstr);
+[trpksu,rrstr]=permsearch(double(trpksu),500,0.2,3);
+regsc=[];
+skips=[];
+if ~isempty(rrstr)
+   for ka=1:length(trpksu(:,1))
+      [regsc(ka),rrstr(ka),skips(ka)]=getmaxscore(trpksu(ka,:),rrstr(ka));
+   end
+   cfs=[-.6 0.002004];
+   nseq=sum(trpksu > 0,2);
+   lhs=double(regsc(:))./(nseq(:)-2); 
+   smat=[skips(:) lhs]';
+   scr=cfs*smat;
+   [dum,mind]=max(scr);
+   trpksu=trpksu(mind,:);
+   trpksu=trpksu(find(~isnan(trpksu) & trpksu >0));
+   statst(indin,1:length(trpksu)+1)=[scr(mind) trpksu];
+else
+   statst(indin,1:length(trpksu)+1)=[NaN trpksu];
+end
    
+endfunction

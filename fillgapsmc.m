@@ -43,17 +43,13 @@ numdo=length(pksm)-1;
       gd=find(dd > rrloc-tol & dd < rrloc+tol);
       gd1=find(dd > 2*(rrloc-tol) & dd < 2*(rrloc+tol));
       gd2=find(dd > 3*(rrloc-tol) & dd < 3*(rrloc+tol));
-      bd=setdiff(pksr,pksr([gd gd1 gd2]));
+      pksout=[pksout pksr([gd gd1 gd2])];
 
-    %end
-
-    bdall=[bdall bd];
     
   endfor
 
-  pksout=setdiff(pksin,bdall);
   %pksout=sort([pksout pksgl]);
-  pksout=sort([pksout ]);
+  pksout=unique([pksout ]);
   return
   pksout=unique(pksout(find(pksout)));
   pksout=pksout(find(~isnan(pksout)));

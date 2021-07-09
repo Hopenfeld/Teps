@@ -2,7 +2,7 @@ function [seqr,rrs,pknos] = permsearch(seq,rrmin,chtol,minpks)
   
 [seqr,rrs] = permsearchloc(seq(find(seq <= 5000)),rrmin,chtol,minpks);
 
-if minpks > 0
+if minpks > 0 
   sseg=find(seq > 5000);
   if ~isempty(sseg)
     [seqra,rrsa] = permsearchloc(seq(sseg),rrmin,chtol,minpks-1);
@@ -12,7 +12,7 @@ if minpks > 0
 end
 
   ns=sum(seqr > 0,2);
-  bds=find(ns < minpks+1 & rrs <1000);
+  bds=find((ns < minpks+1 & rrs <1000));
   seqr(bds,:)=[];
   rrs(bds)=[];
 
@@ -23,8 +23,12 @@ seqt(find(isnan(seqt) | seqt ==0))=max(seq)+1;
 pknos=seqmap(seqt);
 
 function [seqr,rrs,pknos] = permsearchloc(seq,rrmin,chtol,minpks);
-
+seqr=[]; rrs=[]; pksnos=[];
 ns=length(seq);
+if ns==0;
+  return
+end
+
 pvm=bsxfun(@(a,b) bitand(a,b) ~= 0,2.^[0:ns-1],[1:2^ns-1]');
 nr=length(pvm(:,1));
 seqr=pvm .* repmat(seq,nr,1);
@@ -65,10 +69,11 @@ rrs=min(dd,[],2);
 lwrt=find(rrs > 1500 & rrs <= 3000);
 rrs(lwrt)=rrs(lwrt)/2;
 
+
 function [seqr,rrs]=mergeseqs(seqr,seqra,rrs,rrsa);
 
-lws=find(rrs >= 1000);
-lwsa=find(rrsa >= 1000);
+lws=find(rrs >= 0);
+lwsa=find(rrsa >= 0);
 seqra=seqra(lwsa,:);
 rrsa=rrsa(lwsa);
 
@@ -78,7 +83,18 @@ for ii=1:length(lws)
   ru=seqr(lws(ii),:);
   gv=find(~isnan(ru) & ru >0);
   sequ=seqr(lws(ii),gv);
-  rat=(seqra(:,1)-sequ(end))/(sequ(end)-sequ(end-1));
+  if length(sequ) > 1 
+    rat=(seqra(:,1)-sequ(end))/(sequ(end)-sequ(end-1));
+  
+  else
+    rat=(seqra(:,1)-sequ(end))./rrsa(:);
+    if sequ==844
+          rat=(seqra(:,1)-sequ(end))./rrsa(:)
+
+    end
+    
+
+  end
   gds = find(abs(round(rat)-rat) < 0.3);
   if ~isempty(gds)
 

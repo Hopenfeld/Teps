@@ -1,29 +1,41 @@
-function stats = domultisnr(sigs,trpks,samprate,moset)
+function stats = domultisnr(sigs,trpks,samprate,moset,coradj)
 %
 load pkprbmats prbsnr
 
 pksall=[]; nmsall=[]; regscall=[]; compall=[]; snrall=[]; rrsall=[];stats=[];
 
-nchs=11; %number of high quality of peaks in multichannel search
 d=6; %number of samples between second difference points
 cluslim=[4 20]; %minimun and maximum peak widths (in samples)
 pkgp=6; %temporal alignment limit (in samples)
-rthold=[0 0 -2000 -4000 -6000 -8000 -10000 -12000*ones(1,10)]; %temporal regularity thresholds as function 
+%rthold=[0 0 -2000 -4000 -6000 -8000 -10000 -12000*ones(1,10)]; %temporal regularity thresholds as function 
                                                                %based on sequence length 
+rtv=[1:15];
+rthold=-1000*(rtv-2);
 cfs=[-0.5437 0.002004 0.001716];   %score coefficients for skips, temporal regularity and SNR/prominence
+cfsp=[cfs 1]; %with pk timing probability
 rrlim=[400 1300];  %rr interval limits in ms
                                                           
 numchan=length(sigs(:,1));
-numcand=max(20,30-5*(4-numchan)); %number of "best" candidate peaks in each channel
-
+nchs=11+5*(max(0,2-numchan)); %number of high quality of peaks in multichannel search
+numcand=max(25,40-5*(4-numchan)); %number of "best" candidate peaks in each channel
 datoutsc=[];
 snrmat=[];
 trpksadj=round(trpks*samprate/1000);  %adjust true peaks for sampling rate
+regpen=inline("5*min(0,x+700) + x");
+snradjrr=inline("min(0,x-550)/300 + 1");
+regpenrr=inline("max(0,550-x)/300 + 1");
+regbonrr=inline("1-min(0.7,max(0,x-800)/200)");
+
 
 for ii=1:numchan  %process each channel
 
   siggu=sigs(ii,:);
-  [pksx,snrb,pksten,snrba,ddd,nslvlu,statspks] = getcandpks(siggu,d,samprate,cluslim,numcand,trpksadj,rrlim);
+  trpksgcp=trpksadj-round(moset*samprate/1000);
+  [pksx,snrb,pksten,snrba,ddd,nslvlu,statspks] = getcandpks(siggu,d,samprate,cluslim,numcand,trpksgcp,rrlim);
+  pksxn=round(1000*pksx/256);
+  
+  statsg=getmatches(pksxn,trpks,moset);
+  
   %pksten
   %pksx
   %round(pksx*1000/256)
@@ -45,15 +57,23 @@ for ii=1:numchan  %process each channel
     %nmseqsc - number of peaks in each sequence
     %snrssc - SNR/prominence score for each sequence
     if ~isempty(nregsc)
-      snrssckp=round(100*snrssc); 
-      smat=[skipssc(:) nregsc snrssckp(:)]';
+      snradj=snradjrr(rrssc);
+      regadjrr=regpenrr(rrssc).*regbonrr(rrssc);
+      snrssckp=round(100*snradj(:).*snrssc);
+      sfu=round(100*snrssc);
+      rlhs=regpen(regadjrr.*nregsc);
+      smat=[skipssc(:) rlhs snrssckp(:)]';
       gdh=find(nregsc > -800);
-      %[tmsallsc(gdh,:) round(nregsc(gdh)) snrssckp(gdh)(:) rrssc(gdh)(:)]
       scr=round(100*cfs*smat); %score the sequences
       [dum,sinds]=sort(scr,'descend');
       kp=sinds(1:min(3,length(sinds))); %keep 3 best sequences
-      datadd=[rrssc(:)(kp) scr(:)(kp) tmsallsc(kp,:)]; %store rr intervals, scores and sequences
+      datadd=[rrssc(:)(kp) scr(:)(kp) rlhs(kp) skipssc(:)(kp) tmsallsc(kp,:)]; %store rr intervals, scores and sequences
       datoutsc(end+[1:length(datadd(:,1))],[1:length(datadd(1,:))])=datadd; %will be added to best multichannel sequences
+      if dum(1) > 300
+        stats.dat=datoutsc;
+        return        
+      end
+    
     end
 
   end
@@ -66,15 +86,16 @@ end
 
 if numchan > 1
   [spksa,pkprb,~,pkmap]=getclustersmsnr(pksa,0,pkgp,samprate);
+  pkprb=pkprb*coradj;
 %get global peaks spksa and associated Bayesian timing coherence probability pkprb by clustering peak times (pksa) 
 %across channels; pkmap is the mapping from local channel peaks to the global peaks
 else
-  spksa=round(pksx*1000/256);
+  spksa=round(pksx*1000/samprate);
   pkprb=0*spksa;
   pkmap(spksa)=[1:length(spksa)];
 
 end
-
+pkprobo=pkprb;
 rr=pkmap(snrmat(:,1)); %create global SNR matrices snrmat and snrmatglobal, the latter indexed by global peak time
 cc=pkmap(snrmat(:,2));
 mapinv([1:length(spksa)])=spksa;
@@ -119,65 +140,90 @@ pkptr=[1:nchs];
 rpks=sort(spksa(pkptr(end)+1:end)); %rpeaks is the rest of the global peaks
 prbgpks=pkprb(inds);
 [tmsall,rrs,pknos] = permsearch(pksx,rrlim(1),0.25,3);  %find parent sequences based on best globabl peaks
-
 [rr,~,gv]=find(pknos);
 glprbs=accumarray(rr,prbgpks(gv)',[],@sum); %sum of global probablitites for each parent sequence; not used
 nseq=sum(tmsall > 0,2); %sequence length of parent sequence
+
 for ii=1:length(tmsall(:,1))
-  [regsc(ii),rrs(ii),skips(ii)]=getmaxscore(tmsall(ii,:),rrs(ii)); %temp regularity, rr int. and skips for 
-                                                                   %each mother sequence
+  
+    [regsc(ii),rrs(ii),skips(ii)]=getmaxscore(tmsall(ii,:),rrs(ii)); %temp regularity, rr int. and skips for 
+                                                               %each mother sequence
 end
 
 gds=find(regsc > rthold(nseq));
 bds=find((rrs < 625 & nseq <5) | (rrs < 500 & nseq < 6));  %need more sequence entries 
                                                            %for lower RR to keep search reasonable
 gds=setdiff(gds,bds);
-tmsall=tmsall(gds,:);
-regsc=regsc(gds);
-rrs=rrs(gds);
-skips=skips(gds);
-glprbs=glprbs(gds);
-nseq=nseq(gds);
-datout=[];
-scra=[];
-sra1a=[];
-mxsc=-1000;
+if ~isempty(gds)
+  tmsall=tmsall(gds,:);
+  regsc=regsc(gds);
+  rrs=rrs(gds);
+  skips=skips(gds);
+  glprbs=glprbs(gds);
+  nseq=nseq(gds);
+elseif ~isempty(datadd)
+  tmsall=datoutsc(:,5:end);
+  gdtms=find(tmsall > 0 & ~isnan(tmsall));
+  tmsinds=0*tmsall;
+  tmsinds(gdtms)=pkmapo(tmsall(gdtms));
+  pkscmap=pkmapo(tmsall(gdtms));
+  pkprsc(pkscmap)=pkprobo(pkscmap);
+  tmsinds(find(isnan(tmsinds)))=0;
+  [rr,~,gv]=find(tmsinds);
+  glprbs=accumarray(rr,pkprsc(gv)',[],@sum);
+  tmsall(gdtms)=mapinv(pkmapo(tmsall(gdtms)));
+  rrs=datoutsc(:,1);
+  skips=datoutsc(:,4);
+  nseq=sum(tmsall>0,2);
+  rpks=sort(spksa);
+  datoutsc=[]; 
+end
+if ~isempty(tmsall)
+  datout=[];
+  scra=[];
+  sra1a=[];
+  mxsc=-1000;
 
-for ii=1:length(tmsall(:,1))  %loop through parent sequences
+  for ii=1:length(tmsall(:,1))  %loop through parent sequences
   
-  tmsloc=tmsall(ii,:);
+    tmsloc=tmsall(ii,:);
+    tmsloc=tmsloc(find(tmsloc >0 & ~isnan(tmsloc)));
  
-  if skips(ii) > 0 
-    [tmsalla,rrsa,regsca,nmseqa,skipsa] = getchanseqsnr(rpks,tmsloc,rrs(ii),0.1,rthold,rrlim);
-    %if the parent sequence has at least one skipped peak, fill in the gaps between 
-    %widely spaced peaks and generate new candidate sequences tmsalla based on parent
-    %sequence and peaks that fill gaps
-  else
-    tmsalla=tmsloc; rrsa=rrs(ii); regsca=regsc(ii); nmseqa=nseq(ii); skipsa=skips(ii);
-  end
-  if ~isempty(tmsalla)
-    snrvs = getsnrfrtmsall(tmsalla,snrmatglobal); %for sequences that span segments, 
-                                                  %need to fix gap between snrs between segs
-    lhs=double(regsca(:))./(nmseqa(:)-2); 
-    snrvs=round(100*snrvs);
-    smat=[skipsa(:) lhs snrvs(:)]';
-    scr1=cfs*smat;    %peak timing coherence glprbs not used here but improve detection in certain cases
-    [sscrs,sinds]=sort(scr1,'descend');
-    kp=sinds(1:min(length(sinds),10)); %keep 10 best sequences per parent sequence
-    scr1=round(100*scr1(kp))';
-    datadd=[ rrsa(:)(kp) scr1 tmsalla(kp,:)];
-    datout(end+[1:length(datadd(:,1))],[1:length(datadd(1,:))])=datadd;
+    if skips(ii) > 0 
+      [tmsalla,rrsa,regsca,nmseqa,skipsa] = getchanseqsnr(rpks,tmsloc,rrs(ii),0.1,rthold,rrlim);
+      %if the parent sequence has at least one skipped peak, fill in the gaps between 
+      %widely spaced peaks and generate new candidate sequences tmsalla based on parent
+      %sequence and peaks that fill gaps
+    else
+      tmsalla=tmsloc; rrsa=rrs(ii); regsca=regsc(ii); nmseqa=nseq(ii); skipsa=skips(ii);
+    end
+    if ~isempty(tmsalla)
+      snrvs = getsnrfrtmsall(tmsalla,snrmatglobal); %for sequences that span segments, 
+      snradj=snradjrr(rrsa);                                                  %need to fix gap between snrs between segs
+      snrvs=round(100*snradj(:).*snrvs);
+      regadjrr=regpenrr(rrsa) .* regbonrr(rrsa);
+      lhs=double((regadjrr(:).*regsca(:)))./(nmseqa(:)-2);
+      lhs=regpen(lhs);
+      smat=[skipsa(:) lhs snrvs(:) glprbs(ii)*ones(length(lhs),1)]';
+      scr1=cfsp*smat;    %peak timing coherence glprbs not used here but improve detection in certain cases
+      [sscrs,sinds]=sort(scr1,'descend');
+      kp=sinds(1:min(length(sinds),10)); %keep 10 best sequences per parent sequence
+      scr1=round(100*scr1(kp))';
+      datadd=[ rrsa(:)(kp) scr1 lhs(kp) skipsa(:)(kp) tmsalla(kp,:)];
+      datout(end+[1:length(datadd(:,1))],[1:length(datadd(1,:))])=datadd;
+    end
   end
 end
 if ~isempty(datoutsc)
  datout(end+[1:length(datoutsc(:,1))],[1:length(datoutsc(1,:))])=datoutsc;
 end
-
-datout = cullseqsloc(datout);
-%remove the lower scoring sequences in closely related groups
-
-stats.dat=datout;
-
+if ~isempty(datout)
+  datout = cullseqsloc(datout);
+  %remove the lower scoring sequences in closely related groups
+  stats.dat=datout;
+else
+  stats.dat=[];
+end
 endfunction
 
 function snrvs = getsnrfrtmsall(pksin,snrmatloc)
@@ -219,12 +265,53 @@ function datout = cullseqsloc(datin)
 datout=[];
 rrs=unique(datin(:,1));
 
+%tmsallcs=unique(tmsallcs(find(tmsallcs > 0 & ~isnan(tmsallcs))));
 for ii = 1:length(rrs)
   clmp=find(datin(:,1)==rrs(ii) & datin(:,2) > -500);
+  tmsallcs=datin(clmp,5:end);
   scrs=datin(clmp,2);
-  [dum,minds]=sort(scrs,'descend');
-  mout=minds(1:min(3,length(minds)));
+  skps=datin(clmp,4);
+  hs=find(scrs > 400);
+  if ~isempty(hs)
+    [dum,mind]=max(scrs(hs));
+    tmsmx=tmsallcs(hs(mind),:);
+    tmsmx=tmsmx(find(tmsmx > 0 & ~isnan(tmsmx)));
+    hsa=hs(setdiff([1:length(hs)],mind));
+    tmsc=tmsallcs(hsa,:);
+    nsc=sum(tmsc>0,2);
+    nmtch=getmatches(tmsc,tmsmx,0,1000);
+    bds=find(nsc(:)==nmtch(:));
+    scrs(hsa(bds))=-Inf;
+  end
+    
+    [dum,minds]=sort(scrs,'descend');
+    mout=minds(1:min(3,length(minds)));
+  
+
   datout(end+[1:length(mout)],:)=datin(clmp(mout),:);
   
 end
+
+
+  tmsallcs=datout(:,5:end);
+  scrs=datout(:,2);
+  hs=find(scrs > 400);
+  if ~isempty(hs)
+    [dum,mind]=max(scrs(hs));
+    tmsmx=tmsallcs(hs(mind),:);
+    tmsmx=tmsmx(find(tmsmx > 0 & ~isnan(tmsmx)));
+    hsa=hs(setdiff([1:length(hs)],mind));
+    tmsc=tmsallcs(hsa,:);
+    nsc=sum(tmsc>0,2);
+    nmtch=getmatches(tmsc,tmsmx,0,1000);
+    bds=hsa(find(nsc(:)==nmtch(:)));
+    datout(bds,:)=[];
+
+    
+    
+  end
+    
+
+  
+
 endfunction
