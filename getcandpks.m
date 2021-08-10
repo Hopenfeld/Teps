@@ -95,7 +95,6 @@ end
 d2m=d2mu(srt(srt1));
 pksx = round(pks * sampadj);
 
-plotinserts(negpks,trpks,pks,ddd)
 pksbst=round(pksbst * sampadj);
 snrbt = getpairqual(pksbst,pksxau,d2mru,rrlim); %SNR prominence matrices
 snrb = getpairqual(pksx,pksxa,d2mru,rrlim);
