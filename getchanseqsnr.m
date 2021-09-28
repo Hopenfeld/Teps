@@ -11,7 +11,6 @@ pksgl=pksgl(find(~isnan(pksgl)));
    pksout1 = fillgapsmc(pksgl,pksin,rru1);
    pksout=pksout1; 
  else
-
    pksout = fillgapsmc(pksgl,pksin,rru);  %find peaks that "fit" within gaps of parent sequence
   end
 
@@ -21,11 +20,12 @@ pksgl=pksgl(find(~isnan(pksgl)));
     tmsall=sort([pksglr seqadd],2);
 
   else
-    tmsall=pksgl;
+    return
   end
   
     nmseq=sum(tmsall > 0,2);
     for ii=1:length(tmsall(:,1))
+
       [lhood(ii),rrs(ii),skips(ii)]=getmaxscore(tmsall(ii,:),rru);
       %getmaxscore computes temporal regularity measure for each sequence
 
